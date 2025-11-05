@@ -62,7 +62,7 @@ namespace CryptoAnalyzer.Models
     public class CandlesData
     {
         [JsonProperty("open_time")]
-        public List<long> OpenTimeUnixMs { get; set; } = new();
+        public List<string> OpenTimeReadable { get; set; } = new();
 
         [JsonProperty("open")]
         public List<decimal> Open { get; set; } = new();
@@ -81,5 +81,17 @@ namespace CryptoAnalyzer.Models
 
         [JsonProperty("buy_volume")]
         public List<decimal> BuyVolume { get; set; } = new();
+    }
+
+    public class Ticker24hr
+    {
+        public string Symbol { get; set; }
+        public string PriceChangePercent { get; set; }
+    }
+
+    public class TopMovers
+    {
+        public List<Ticker24hr> TopGainers { get; set; } = new();
+        public List<Ticker24hr> TopLosers { get; set; } = new();
     }
 }

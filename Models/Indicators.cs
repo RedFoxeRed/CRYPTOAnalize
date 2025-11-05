@@ -8,7 +8,10 @@ namespace CryptoAnalyzer.Models
         public double? Rsi14 { get; set; }
 
         [JsonProperty("macd")]
-        public MacdData Macd { get; set; }
+        public MacdData? Macd { get; set; }
+
+        [JsonProperty("boll")]
+        public BollData? Boll { get; set; }  // ✅ Исправлено: правильное имя и тип
     }
 
     public class MacdData
@@ -21,5 +24,18 @@ namespace CryptoAnalyzer.Models
 
         [JsonProperty("histogram")]
         public double? Histogram { get; set; }
+    }
+
+    // ✅ Новый класс для Bollinger Bands
+    public class BollData
+    {
+        [JsonProperty("upper")]
+        public double? Upper { get; set; }
+
+        [JsonProperty("middle")]
+        public double? Middle { get; set; }
+
+        [JsonProperty("lower")]
+        public double? Lower { get; set; }
     }
 }

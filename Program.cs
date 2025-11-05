@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Reflection.Metadata.Ecma335;
 using System.Threading.Tasks;
 using CryptoAnalyzer.Models;
 using CryptoAnalyzer.Services;
@@ -14,3 +15,8 @@ var snapshot = await service.GetMarketSnapshotAsync(symbol, intervals);
 
 string json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
 Console.WriteLine(json);
+
+var t = await service.GetTop10GainersAndLosersWith25WeeksAsync();
+string tt = "";
+t.TopGainers.ForEach(x => tt += x.Symbol + " : " + x.PriceChangePercent + " / ");
+Console.WriteLine(tt);
