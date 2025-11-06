@@ -16,7 +16,7 @@ namespace CRYPTOAnalize.Services
         public async Task StartToWorkAsync(CancellationToken cancelToken)
         {
             var service = new BinanceService();
-            var bybitService = new BybitService("apiKey", "sekretkey");
+            var bybitService = new BybitService("ikgZnYicSZui5G2eWe", "ikgZnYicSZui5G2eWe");
 
             string[] intervals = { "30m", "2h", "1d", "1w" };
             string[] intervalsForUpdate = { "5m", "30m", "1h", "1d" };
@@ -28,12 +28,12 @@ namespace CRYPTOAnalize.Services
 
                 string symbol = ticker.Symbol; // или BTCUSDT, ETHUSDT и т.д.
 
-                Console.WriteLine($"Выбран токен {symbol} с движением цены {ticker.PriceChangePercent}.");
+                Console.WriteLine($"Выбран токен {symbol} с движением цены {ticker.PriceChangePercent}%.");
 
                 bool checkData = await service.IsSymbolAvailableOnBinanceSpotAsync(symbol);
                 if (!checkData)
                 {
-                    Console.WriteLine("Данных о токене {symbol} на Binance не найдены. Подбор другого токена..");
+                    Console.WriteLine($"Данных о токене {symbol} на Binance не найдены. Подбор другого токена..");
                     await Task.Delay(750, cancelToken);
                     continue;
                 }
@@ -59,7 +59,7 @@ namespace CRYPTOAnalize.Services
 
                 while (exitFromWhile) 
                 {
-                    await Task.Delay(5 * 60 * 1000, cancelToken);
+                    await Task.Delay(15 * 60 * 1000, cancelToken);
 
                     int actualContract = await CheckPositionAndOrder(bybitService, symbol, signal); // 0 - сделка закрыта, 1 - открыт ордер, 2 - открыта позиция
 

@@ -17,7 +17,7 @@ namespace CRYPTOAnalize.Services
     public class BybitService
     {
         // 🔁 Переключение: Testnet / Mainnet
-        private const string BaseUrl = "https://api-testnet.bybit.com"; // ← замените на "https://api.bybit.com" для реальной торговли
+        private const string BaseUrl = "https://api.bybit.com"; // ← замените на "https://api.bybit.com" для реальной торговли
 
         private readonly string _apiKey;
         private readonly string _secretKey;
