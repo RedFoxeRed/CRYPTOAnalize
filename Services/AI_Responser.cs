@@ -11,7 +11,7 @@ namespace CRYPTOAnalize.Services
     public class AI_Responser
     {
         public static async Task<string> ASK(string userMessage)
-        {
+        {           
             var response = await GetResponseFromNewAPI(userMessage);
             return response;
         }
@@ -26,7 +26,7 @@ namespace CRYPTOAnalize.Services
             // Конфигурация HTTP клиента
             using (var httpClient = new HttpClient())
             {
-                httpClient.Timeout = TimeSpan.FromMinutes(4); // <-- КЛЮЧЕВАЯ СТРОКА
+                httpClient.Timeout = TimeSpan.FromMinutes(5); // <-- КЛЮЧЕВАЯ СТРОКА
                 httpClient.BaseAddress = new Uri(baseURL);
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
 
@@ -37,7 +37,7 @@ namespace CRYPTOAnalize.Services
                     {
                     new { role = "user", content = userMessage }
                 },
-                    max_tokens = 35000,
+                    max_tokens = 75000,
                     model = mod
                 };
 
@@ -50,6 +50,7 @@ namespace CRYPTOAnalize.Services
                 while (response.StatusCode == (HttpStatusCode)429 || response.StatusCode == HttpStatusCode.BadGateway)
                 {
                     await Task.Delay(2500); // Переводим секунды в миллисекунды
+                    Console.WriteLine("Повторная попытка связаться с нейросетью..");
                     response = await httpClient.PostAsync("chat/completions", httpContent);
                 }
 
@@ -60,7 +61,16 @@ namespace CRYPTOAnalize.Services
                 var responseContent = await response.Content.ReadAsStringAsync();
 
                 // Вывод сообщения
-                var jsonResponse = JsonConvert.DeserializeObject<FreeGPTResponseFormatNEW>(responseContent);
+                FreeGPTResponseFormatNEW jsonResponse = null;
+                try
+                {
+                    jsonResponse = JsonConvert.DeserializeObject<FreeGPTResponseFormatNEW>(responseContent);
+
+                }
+                catch (Exception ex) 
+                {
+                    Console.WriteLine("Не удалось обработать запрос нейросети..");
+                }
                 return jsonResponse.choices[0].Message.Content;
             };
         }

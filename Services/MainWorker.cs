@@ -43,14 +43,19 @@ namespace CRYPTOAnalize.Services
                 var balance = await GetBalance(bybitService);
 
                 var signal = await PromtSender.GetSignalDataFromLLM(ticker, json, balance);
+
+                if (signal == null)
+                    continue;
+
                 if (signal.InvestmentAmountUsd < 2)
                 {
-                    Console.WriteLine($"LLM решила не вкладываться в {symbol}. Поиск следующего токена..");
+                    Console.WriteLine($"Было решено не вкладываться в {symbol}. Поиск следующего токена..");
                     await Task.Delay(750, cancelToken);
                     continue;
                 }
 
                 Console.WriteLine("Начало работы по сигналу..");
+                Console.WriteLine($"Попытка вложиться на {signal.InvestmentAmountUsd} USDT..");
 
                 await AddOrder(bybitService, signal, symbol);
 
@@ -66,6 +71,7 @@ namespace CRYPTOAnalize.Services
                     if (actualContract == 0)
                     {
                         Console.WriteLine("Сделка успешно закрыта.");
+                        await GetBalance(bybitService);
                         break;
                     }
                     indexPos++;
@@ -87,6 +93,7 @@ namespace CRYPTOAnalize.Services
 
                     if(actualContract == 2)
                     {
+                        Console.WriteLine($"Принято решение изменить данные позиции:\n\tTP: {signal.TakeProfit} -> {updatedSignal.TakeProfit}\n\tSL: {signal.StopLoss} -> {updatedSignal.StopLoss}");
                         await bybitService.UpdatePositionTpSlAsync(symbol, updatedSignal.TakeProfit, updatedSignal.StopLoss);
                     }
                 }

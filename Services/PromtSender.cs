@@ -24,8 +24,15 @@ namespace CRYPTOAnalize.Services
                 "\\nНикаких 'hold', никаких пояснений — только JSON по схеме.\"\r\n}\r\ndata:" + json;
 
             string request = await AI_Responser.ASK(answer);
-
-            TradingSignal retSig = JsonConvert.DeserializeObject<TradingSignal>(request.Replace("```json", "").Replace("```", "").Replace("'''", "").Trim());
+            TradingSignal retSig = null;
+            try
+            {
+                retSig = JsonConvert.DeserializeObject<TradingSignal>(request.Replace("```json", "").Replace("```", "").Replace("'''", "").Trim());
+            }
+            catch
+            {
+                Console.WriteLine("Непредвиденая ошибка обработки запроса.. новая попытка");
+            }
 
             return retSig;
         }
@@ -44,8 +51,15 @@ namespace CRYPTOAnalize.Services
                 "**Вывод строго в том же JSON-формате, что и исходный сигнал**, с **обновлёнными только stop_loss и take_profit**.\\n\\nНикаких пояснений, только JSON.\"\r\n}\r\norderData:\r\n" + signalJSon + "\r\ndata:\r\n" + newJsonData;
 
             string request = await AI_Responser.ASK(answer);
-
-            TradingSignal retSig = JsonConvert.DeserializeObject<TradingSignal>(request.Replace("```json", "").Replace("```", "").Replace("'''", "").Trim());
+            TradingSignal retSig = null;
+            try
+            {
+                retSig = JsonConvert.DeserializeObject<TradingSignal>(request.Replace("```json", "").Replace("```", "").Replace("'''", "").Trim());
+            }
+            catch
+            {
+                Console.WriteLine("Непредвиденая ошибка обработки запроса.. новая попытка");
+            }
 
             return retSig;
         }
