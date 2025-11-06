@@ -250,5 +250,43 @@ namespace CryptoAnalyzer.Services
                 return 0;
             }
         }
+
+
+        public async Task<bool> IsSymbolAvailableOnBinanceSpotAsync(string symbol)
+        {
+            try
+            {
+                // Эндпоинт спотового exchangeInfo
+                var url = "https://api.binance.com/api/v3/exchangeInfo";
+                var json = await client.GetStringAsync(url);
+                var data = JObject.Parse(json);
+
+                var symbols = data["symbols"] as JArray;
+                if (symbols == null) return false;
+
+                var normalizedSymbol = symbol.ToUpperInvariant();
+
+                foreach (var item in symbols)
+                {
+                    var symbolName = item["symbol"]?.ToString();
+                    if (string.Equals(symbolName, normalizedSymbol, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var status = item["status"]?.ToString();
+
+                        // На споте активные пары обычно имеют статус "TRADING"
+                        // Другие возможные статусы: "HALT", "BREAK", "PRE_TRADING" и т.д.
+                        if (status == "TRADING")
+                            return true;
+                    }
+                }
+
+                return false;
+            }
+            catch
+            {
+                // При любой ошибке (сеть, парсинг и т.д.) считаем, что символ недоступен
+                return false;
+            }
+        }
     }
 }

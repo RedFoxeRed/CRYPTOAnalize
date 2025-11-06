@@ -1,22 +1,27 @@
 ﻿using System;
 using System.Reflection.Metadata.Ecma335;
 using System.Threading.Tasks;
+using CRYPTOAnalize.Services;
 using CryptoAnalyzer.Models;
 using CryptoAnalyzer.Services;
 using Newtonsoft.Json;
 
-var service = new BinanceService();
-string symbol = "XRPUSDT"; // или BTCUSDT, ETHUSDT и т.д.
+var worker = new MainWorker();
+var cts = new CancellationTokenSource();
+var workerTask = worker.StartToWorkAsync(cts.Token);
 
-string[] intervals = { "30m", "2h", "1d", "1w" };
+Console.WriteLine("Программа работает. Нажмите любую клавишу для остановки...");
+_ = Console.ReadKey(intercept: true);
 
-Console.WriteLine($"Получение данных для {symbol}...");
-var snapshot = await service.GetMarketSnapshotAsync(symbol, intervals);
+cts.Cancel();
 
-string json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
-Console.WriteLine(json);
+try
+{
+    await workerTask; // Дожидаемся корректного завершения
+}
+catch (OperationCanceledException)
+{
+    Console.WriteLine("Программа остановлена по запросу.");
+}
 
-var t = await service.GetTop10GainersAndLosersWith25WeeksAsync();
-string tt = "";
-t.TopGainers.ForEach(x => tt += x.Symbol + " : " + x.PriceChangePercent + " / ");
-Console.WriteLine(tt);
+Console.WriteLine("Готово.");

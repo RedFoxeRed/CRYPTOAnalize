@@ -94,4 +94,70 @@ namespace CryptoAnalyzer.Models
         public List<Ticker24hr> TopGainers { get; set; } = new();
         public List<Ticker24hr> TopLosers { get; set; } = new();
     }
+
+    public class TradingSignal
+    {
+        [JsonProperty("action")]
+        public string Action { get; set; }
+
+        [JsonProperty("entry_price")]
+        public decimal EntryPrice { get; set; }
+
+        [JsonProperty("stop_loss")]
+        public decimal StopLoss { get; set; }
+
+        [JsonProperty("take_profit")]
+        public decimal TakeProfit { get; set; }
+
+        [JsonProperty("confidence")]
+        public decimal Confidence { get; set; }
+
+        [JsonProperty("success_probability")]
+        public decimal SuccessProbability { get; set; }
+
+        [JsonProperty("long_probability")]
+        public decimal LongProbability { get; set; }
+
+        [JsonProperty("short_probability")]
+        public decimal ShortProbability { get; set; }
+
+        [JsonProperty("investment_amount_usd")]
+        public decimal InvestmentAmountUsd { get; set; }
+
+        [JsonProperty("investment_percent")]
+        public decimal InvestmentPercent { get; set; }
+
+        [JsonProperty("hold_time")]
+        public int HoldTime { get; set; }
+    }
+    public class BybitPosition
+    {
+        public string Symbol { get; set; } = default!;
+        public string Side { get; set; } = default!; // "Buy" = лонг, "Sell" = шорт
+        public decimal Size { get; set; } // количество базовой валюты (например, BTC)
+        public decimal EntryPrice { get; set; }
+        public decimal MarkPrice { get; set; }
+        public decimal PositionValue { get; set; } // номинал в USDT
+        public int Leverage { get; set; }
+        public decimal? TakeProfit { get; set; }
+        public decimal? StopLoss { get; set; }
+        public decimal UnrealizedPnl { get; set; }
+        public decimal LiqPrice { get; set; }
+    }
+    public class BybitOrder
+    {
+        public string OrderId { get; set; } = string.Empty;
+        public string Symbol { get; set; } = string.Empty;
+        public string Side { get; set; } = string.Empty; // "Buy" или "Sell"
+        public decimal Qty { get; set; } // количество контрактов/активов
+        public decimal? Price { get; set; } // null для рыночных ордеров
+        public decimal? StopLoss { get; set; }
+        public decimal? TakeProfit { get; set; }
+        public string Status { get; set; } = string.Empty; // "New", "Filled", "Cancelled", "PartiallyFilled", "Untriggered" и т.д.
+        public string OrderType { get; set; } = string.Empty; // "Limit", "Market", "Stop", "StopLimit" и т.п.
+        public string? ReduceOnly { get; set; } // "true"/"false" или bool, в зависимости от API
+        public string? TimeInForce { get; set; } // "GTC", "IOC", "FOK"
+        public long CreatedTime { get; set; } // Unix timestamp в миллисекундах
+        public long? UpdatedTime { get; set; } // Unix timestamp в миллисекундах
+    }
 }
