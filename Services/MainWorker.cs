@@ -16,7 +16,7 @@ namespace CRYPTOAnalize.Services
         public async Task StartToWorkAsync(CancellationToken cancelToken)
         {
             var service = new BinanceService();
-            var bybitService = new BybitService("ikgZnYicSZui5G2eWe", "ikgZnYicSZui5G2eWe");
+            var bybitService = new BybitService("ikgZnYicSZui5G2eWe", "M5by2TsAdp60hFgYoULFVobRz4doKV4Orgj8");
 
             string[] intervals = { "30m", "2h", "1d", "1w" };
             string[] intervalsForUpdate = { "5m", "30m", "1h", "1d" };
@@ -94,7 +94,7 @@ namespace CRYPTOAnalize.Services
         }
         private async Task<decimal> GetBalance(BybitService bybitService)
         {
-            var balance = await bybitService.GetUsdtBalanceAsync();
+            decimal balance = await bybitService.GetUsdtBalanceAsync();
 
             Console.WriteLine($"Текущий баланс кошелька: {balance} USDT.");
 
@@ -102,25 +102,28 @@ namespace CRYPTOAnalize.Services
         }
         private async Task<JsonDocument> AddOrder(BybitService bybitService, TradingSignal signal, string symbol)
         {
-            string action = "Buy";
-
-            if (signal.Action.ToLower() == "sell" || signal.Action.ToLower() == "short")
-                action = "Sell";
-
-            int leverage = 10;
-            if (signal.SuccessProbability > 85)
-                leverage = 20;
-
-            Console.WriteLine($"Открытие ордера {symbol}.\n\tEntry = {signal.EntryPrice}.\n\tTP = {signal.TakeProfit}.\n\tSL = {signal.StopLoss}..");
-
-            var retReq = await bybitService.PlaceConditionalTradeAsync(symbol.ToUpper(), signal.EntryPrice, signal.InvestmentAmountUsd, signal.TakeProfit, signal.StopLoss, leverage, action);
-
-            if (retReq != null)
+            string side = signal.Action.ToLower() switch
             {
-                Console.WriteLine("Сделка успешно создана!");
-            }
+                "sell" or "short" => "Sell",
+                _ => "Buy"
+            };
 
-            return retReq;
+            int leverage = signal.SuccessProbability > 85 ? 20 : 10;
+
+            Console.WriteLine($"Открытие ордера {symbol}.\n\tEntry = {signal.EntryPrice}\n\tTP = {signal.TakeProfit}\n\tSL = {signal.StopLoss}");
+
+            var response = await bybitService.PlaceConditionalTradeAsync(
+                symbol,
+                signal.EntryPrice,
+                signal.InvestmentAmountUsd,
+                signal.TakeProfit,
+                signal.StopLoss,
+                leverage,
+                side
+            );
+
+            Console.WriteLine("Сделка успешно создана!");
+            return response;
         }
 
         private async Task<int> CheckPositionAndOrder(BybitService bbs, string symbol, TradingSignal signal)

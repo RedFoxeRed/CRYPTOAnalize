@@ -17,7 +17,7 @@ namespace CRYPTOAnalize.Services
     public class BybitService
     {
         // 🔁 Переключение: Testnet / Mainnet
-        private const string BaseUrl = "https://api.bybit.com"; // ← замените на "https://api.bybit.com" для реальной торговли
+        private const string BaseUrl = "https://api-demo.bybit.com"; // ← замените на "https://api.bybit.com" для реальной торговли
 
         private readonly string _apiKey;
         private readonly string _secretKey;
@@ -56,64 +56,43 @@ namespace CRYPTOAnalize.Services
             if (positionSizeUsdt <= 0)
                 throw new ArgumentException("Position size must be > 0", nameof(positionSizeUsdt));
 
-            // 1. Получаем текущую рыночную цену
-            decimal currentPrice = await GetLastPriceAsync(symbol);
+            // В unified-аккаунте плечо не указывается на символ — оно глобальное
+            // (можно пропустить SetLeverage, или задать один раз в UI)
 
-            // 2. Определяем направление
-            if (entryPrice < currentPrice)
-            {
-                side = "Sell"; // ожидаем падение → шорт
-            }
-            else
-            {
-                throw new ArgumentException("Entry price must be different from current market price.", nameof(entryPrice));
-            }
+            // Определяем side: Buy = лонг (вход выше рынка), Sell = шорт (вход ниже рынка)
+            // Но в unified лонг/шорт управляется через режим позиции (Hedge/One-way)
+            // Мы предполагаем One-way → "Buy" = лонг, "Sell" = шорт
 
-            // 3. Проверяем логичность TP/SL
-            ValidateTpSl(entryPrice, takeProfit, stopLoss, side);
-
-            // 4. Устанавливаем плечо (можно закомментировать, если уже установлено)
-            await SetLeverageAsync(symbol, leverage);
-
-            // 5. Отправляем conditional ордер
-            var endpoint = "/private/linear/stop-order/create";
-            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
-
-            // Рассчитываем qty = номинал / цена входа
+            // Рассчитываем количество в базовой валюте (например, BTC для BTCUSDT)
             decimal qty = Math.Floor(positionSizeUsdt / entryPrice * 100_000_000m) / 100_000_000m;
             if (qty <= 0)
-                throw new InvalidOperationException("Calculated quantity is zero. Position size too small.");
+                throw new InvalidOperationException("Calculated quantity is zero.");
 
             var parameters = new Dictionary<string, string>
-        {
-            { "api_key", _apiKey },
-            { "symbol", symbol },
-            { "side", side },
-            { "order_type", "Market" },
-            { "qty", qty.ToString(CultureInfo.InvariantCulture) },
-            { "stop_px", entryPrice.ToString(CultureInfo.InvariantCulture) },
-            { "base_price", currentPrice.ToString(CultureInfo.InvariantCulture) },
-            { "trigger_by", "LastPrice" },
-            { "time_in_force", "GoodTillCancel" },
-            { "position_idx", "0" },
-            { "close_on_trigger", "false" },
-            { "timestamp", timestamp.ToString() }
-        };
+            {
+                { "category", "linear" }, // обязательный параметр в v5
+                { "symbol", symbol.ToUpper() },
+                { "side", side }, // "Buy" или "Sell"
+                { "orderType", "Limit" },
+                { "qty", qty.ToString(CultureInfo.InvariantCulture) },
+                { "price", entryPrice.ToString(CultureInfo.InvariantCulture) },
+                { "timeInForce", "GTC" },
+                { "positionIdx", "0" }, // 0 = one-way mode
+                { "api_key", _apiKey },
+                { "recvWindow", "30000" },
+                { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString() }
+            };
 
             if (takeProfit.HasValue)
-                parameters["take_profit"] = takeProfit.Value.ToString(CultureInfo.InvariantCulture);
+                parameters["takeProfit"] = takeProfit.Value.ToString(CultureInfo.InvariantCulture);
 
             if (stopLoss.HasValue)
-                parameters["stop_loss"] = stopLoss.Value.ToString(CultureInfo.InvariantCulture);
+                parameters["stopLoss"] = stopLoss.Value.ToString(CultureInfo.InvariantCulture);
 
-            if (takeProfit.HasValue)
-                parameters["tp_trigger_by"] = "LastPrice";
+            if (takeProfit.HasValue || stopLoss.HasValue)
+                parameters["tpslMode"] = "Full"; // или "Partial"
 
-            if (stopLoss.HasValue)
-                parameters["sl_trigger_by"] = "LastPrice";
-
-            var content = BuildSignedContent(parameters);
-            var response = await SendSignedRequestAsync(endpoint, content);
+            var response = await SendSignedV5RequestAsync("/v5/order/create", parameters, HttpMethod.Post);
             return JsonDocument.Parse(response);
         }
 
@@ -134,45 +113,74 @@ namespace CRYPTOAnalize.Services
             return decimal.Parse(lastPrice, CultureInfo.InvariantCulture);
         }
 
-        private async Task<JsonDocument> SetLeverageAsync(string symbol, int leverage)
-        {
-            var endpoint = "/private/linear/position/set-leverage";
-            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+        //private async Task SetLeverageAsync(string symbol, int leverage)
+        //{
+        //    var parameters = new Dictionary<string, string>
+        //    {
+        //        { "category", "linear" },
+        //        { "symbol", symbol.ToUpper() },
+        //        { "buyLeverage", leverage.ToString() },
+        //        { "sellLeverage", leverage.ToString() }
+        //    };
 
-            var parameters = new Dictionary<string, string>
+        //    await SendSignedV5RequestAsync("/v5/position/set-leverage", parameters, HttpMethod.Post);
+        //}
+        private async Task<string> SendSignedV5RequestAsync(string endpoint, Dictionary<string, string> parameters, HttpMethod method)
         {
-            { "api_key", _apiKey },
-            { "symbol", symbol },
-            { "buy_leverage", leverage.ToString() },
-            { "sell_leverage", leverage.ToString() },
-            { "timestamp", timestamp }
-        };
+            // Генерируем timestamp и recvWindow (если не задан)
+            if (!parameters.ContainsKey("timestamp"))
+                parameters["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
 
-            var content = BuildSignedContent(parameters);
-            var response = await SendSignedRequestAsync(endpoint, content);
-            return JsonDocument.Parse(response);
+            if (!parameters.ContainsKey("recvWindow"))
+                parameters["recvWindow"] = "30000";
+
+            // Сортируем и строим query string
+            var sorted = parameters.OrderBy(p => p.Key)
+                                   .Select(p => $"{Uri.EscapeDataString(p.Key)}={Uri.EscapeDataString(p.Value)}")
+                                   .ToArray();
+            var queryString = string.Join("&", sorted);
+            var signature = ComputeSignature(queryString, _secretKey);
+            var fullUrl = $"{BaseUrl}{endpoint}?{queryString}&sign={signature}";
+
+            using var request = new HttpRequestMessage(method, fullUrl);
+            // Для POST в v5 — тело НЕ нужно, всё в URL
+            // Но некоторые эндпоинты требуют Content-Type (даже без тела)
+            if (method == HttpMethod.Post)
+                request.Content = new StringContent("", Encoding.UTF8, "application/json");
+
+            using var response = await _httpClient.SendAsync(request);
+            var responseText = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+                throw new Exception($"HTTP {response.StatusCode}: {responseText}");
+
+            // Проверяем retCode
+            using var doc = JsonDocument.Parse(responseText);
+            if (doc.RootElement.GetProperty("retCode").GetInt32() != 0)
+                throw new Exception($"API Error: {doc.RootElement.GetProperty("retMsg").GetString()}");
+
+            return responseText;
         }
+        //private void ValidateTpSl(decimal entryPrice, decimal? tp, decimal? sl, string side)
+        //{
+        //    if (tp.HasValue && sl.HasValue && tp.Value == sl.Value)
+        //        throw new ArgumentException("Take profit and stop loss cannot be equal.");
 
-        private void ValidateTpSl(decimal entryPrice, decimal? tp, decimal? sl, string side)
-        {
-            if (tp.HasValue && sl.HasValue && tp.Value == sl.Value)
-                throw new ArgumentException("Take profit and stop loss cannot be equal.");
-
-            if (side == "Buy")
-            {
-                if (tp.HasValue && tp.Value <= entryPrice)
-                    throw new ArgumentException("For long, take profit must be > entry price.");
-                if (sl.HasValue && sl.Value >= entryPrice)
-                    throw new ArgumentException("For long, stop loss must be < entry price.");
-            }
-            else if (side == "Sell")
-            {
-                if (tp.HasValue && tp.Value >= entryPrice)
-                    throw new ArgumentException("For short, take profit must be < entry price.");
-                if (sl.HasValue && sl.Value <= entryPrice)
-                    throw new ArgumentException("For short, stop loss must be > entry price.");
-            }
-        }
+        //    if (side == "Buy")
+        //    {
+        //        if (tp.HasValue && tp.Value <= entryPrice)
+        //            throw new ArgumentException("For long, take profit must be > entry price.");
+        //        if (sl.HasValue && sl.Value >= entryPrice)
+        //            throw new ArgumentException("For long, stop loss must be < entry price.");
+        //    }
+        //    else if (side == "Sell")
+        //    {
+        //        if (tp.HasValue && tp.Value >= entryPrice)
+        //            throw new ArgumentException("For short, take profit must be < entry price.");
+        //        if (sl.HasValue && sl.Value <= entryPrice)
+        //            throw new ArgumentException("For short, stop loss must be > entry price.");
+        //    }
+        //}
 
         private string BuildSignedContent(Dictionary<string, string> parameters)
         {
@@ -201,11 +209,53 @@ namespace CRYPTOAnalize.Services
             return responseString;
         }
 
+        //private async Task<string> SendSignedRequestAsync(string endpoint, Dictionary<string, string> parameters)
+        //{
+        //    var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+        //    parameters["timestamp"] = timestamp;
+
+        //    var sortedParams = parameters
+        //        .OrderBy(kvp => kvp.Key)
+        //        .Select(kvp => $"{Uri.EscapeDataString(kvp.Key)}={Uri.EscapeDataString(kvp.Value)}")
+        //        .ToList();
+
+        //    var queryString = string.Join("&", sortedParams);
+        //    var signature = ComputeSignature(queryString, _secretKey);
+        //    var signedQueryString = queryString + $"&sign={signature}";
+
+        //    // Убедитесь, что endpoint не содержит пробелов!
+        //    var fullUrl = BaseUrl.TrimEnd('/') + "/" + endpoint.Trim('/') + "?" + signedQueryString;
+
+        //    // Используем GET, а не POST!
+        //    var httpRequest = new HttpRequestMessage(HttpMethod.Get, fullUrl);
+
+        //    var response = await _httpClient.SendAsync(httpRequest);
+        //    var responseString = await response.Content.ReadAsStringAsync();
+
+        //    if (!response.IsSuccessStatusCode)
+        //        throw new Exception($"Bybit API Error ({response.StatusCode}): {responseString}");
+
+        //    return responseString;
+        //}
+
+        //private static string ComputeSignature(string payload, string secret)
+        //{
+        //    using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+        //    var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
+        //    return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+        //}
+
         private static string ComputeSignature(string payload, string secret)
         {
-            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
-            var hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(payload));
-            return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            var secretBytes = Encoding.UTF8.GetBytes(secret);
+            using var hmac = new HMACSHA256(secretBytes);
+            var payloadBytes = Encoding.UTF8.GetBytes(payload);
+            var hashBytes = hmac.ComputeHash(payloadBytes);
+            return BytesToHex(hashBytes); // или аналог
+        }
+        private static string BytesToHex(byte[] bytes)
+        {
+            return BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
         }
 
         /// <summary>
@@ -214,30 +264,52 @@ namespace CRYPTOAnalize.Services
         /// <returns>Баланс в USDT</returns>
         public async Task<decimal> GetUsdtBalanceAsync()
         {
-            // Эндпоинт для получения кошелька (wallet balance)
-            var endpoint = "/v2/private/wallet/balance";
+            var endpoint = "/v5/account/wallet-balance";
             var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
 
             var parameters = new Dictionary<string, string>
-            {
-                { "api_key", _apiKey },
-                { "coin", "USDT" },        // ← можно заменить на другую валюту при необходимости
-                { "timestamp", timestamp }
-            };
+    {
+        { "api_key", _apiKey },
+        { "accountType", "UNIFIED" },
+        { "coin", "USDT" },
+        { "recvWindow", "30000" },
+        { "timestamp", timestamp }
+    };
 
-            var content = BuildSignedContent(parameters);
-            var response = await SendSignedRequestAsync(endpoint, content);
+            var sorted = parameters.OrderBy(p => p.Key)
+                                   .Select(p => $"{p.Key}={p.Value}")
+                                   .ToArray();
+            var queryString = string.Join("&", sorted);
+            var signature = ComputeSignature(queryString, _secretKey);
+            var url = $"https://api-demo.bybit.com{endpoint}?{queryString}&sign={signature}";
 
-            using var doc = JsonDocument.Parse(response);
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            using var response = await _httpClient.SendAsync(request);
+            var json = await response.Content.ReadAsStringAsync();
+
+            using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            if (root.GetProperty("ret_code").GetInt32() != 0)
-                throw new Exception($"Failed to fetch balance: {root.GetProperty("ret_msg").GetString()}");
+            if (root.GetProperty("retCode").GetInt32() != 0)
+                throw new Exception($"API Error: {root.GetProperty("retMsg").GetString()}");
 
-            // Путь к балансу: result.USDT.available_balance
-            var usdtData = root.GetProperty("result").GetProperty("USDT");
-            var balanceStr = usdtData.GetProperty("available_balance").GetString();
-            return decimal.Parse(balanceStr, CultureInfo.InvariantCulture);
+            var walletList = root.GetProperty("result").GetProperty("list");
+            if (walletList.GetArrayLength() == 0)
+                throw new Exception("No wallet data.");
+
+            var unifiedWallet = walletList[0];
+            var coins = unifiedWallet.GetProperty("coin").EnumerateArray();
+
+            foreach (var coin in coins)
+            {
+                if (coin.GetProperty("coin").GetString() == "USDT")
+                {
+                    var balanceStr = coin.GetProperty("walletBalance").GetString();
+                    return decimal.Parse(balanceStr, CultureInfo.InvariantCulture);
+                }
+            }
+
+            throw new Exception("USDT not found in wallet.");
         }
 
         /// <summary>
@@ -250,33 +322,32 @@ namespace CRYPTOAnalize.Services
             string? tpTriggerBy = "LastPrice",
             string? slTriggerBy = "LastPrice")
         {
-            var endpoint = "/private/linear/position/trading-stop";
-            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
-
             var parameters = new Dictionary<string, string>
             {
+                { "category", "linear" },
+                { "symbol", symbol.ToUpper() },
                 { "api_key", _apiKey },
-                { "symbol", symbol },
-                { "timestamp", timestamp }
+                { "recvWindow", "30000" },
+                { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString() }
             };
 
             if (takeProfit.HasValue)
-                parameters["take_profit"] = takeProfit.Value.ToString(CultureInfo.InvariantCulture);
+                parameters["takeProfit"] = takeProfit.Value.ToString(CultureInfo.InvariantCulture);
 
             if (stopLoss.HasValue)
-                parameters["stop_loss"] = stopLoss.Value.ToString(CultureInfo.InvariantCulture);
+                parameters["stopLoss"] = stopLoss.Value.ToString(CultureInfo.InvariantCulture);
 
-            if (takeProfit.HasValue)
-                parameters["tp_trigger_by"] = tpTriggerBy;
+            // В v5 trigger-by указывается как enum: "LastPrice", "IndexPrice", "MarkPrice"
+            if (takeProfit.HasValue && !string.IsNullOrEmpty(tpTriggerBy))
+                parameters["tpTriggerBy"] = tpTriggerBy;
 
-            if (stopLoss.HasValue)
-                parameters["sl_trigger_by"] = slTriggerBy;
+            if (stopLoss.HasValue && !string.IsNullOrEmpty(slTriggerBy))
+                parameters["slTriggerBy"] = slTriggerBy;
 
-            // Для One-way mode position_idx = 0 (по умолчанию)
-            parameters["position_idx"] = "0";
+            // Для one-way mode positionIdx = 0 (по умолчанию)
+            parameters["positionIdx"] = "0";
 
-            var content = BuildSignedContent(parameters);
-            var response = await SendSignedRequestAsync(endpoint, content);
+            var response = await SendSignedV5RequestAsync("/v5/position/set-trading-stop", parameters, HttpMethod.Post);
             return JsonDocument.Parse(response);
         }
 
@@ -353,96 +424,109 @@ namespace CRYPTOAnalize.Services
         /// </summary>
         public async Task<BybitPosition?> GetOpenPositionAsync(string symbol)
         {
-            var endpoint = "/private/linear/position/list";
-            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
-
             var parameters = new Dictionary<string, string>
-            {
-                { "api_key", _apiKey },
-                { "symbol", symbol },
-                { "timestamp", timestamp }
-            };
+    {
+        { "category", "linear" },
+        { "symbol", symbol.ToUpper() },
+        { "api_key", _apiKey },
+        { "recvWindow", "30000" },
+        { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString() }
+    };
 
-            var content = BuildSignedContent(parameters);
-            var response = await SendSignedRequestAsync(endpoint, content);
+            var response = await SendSignedV5RequestAsync("/v5/position/list", parameters, HttpMethod.Get);
 
             using var doc = JsonDocument.Parse(response);
             var root = doc.RootElement;
 
-            if (root.GetProperty("ret_code").GetInt32() != 0)
-                throw new Exception($"Failed to fetch position: {root.GetProperty("ret_msg").GetString()}");
+            if (root.GetProperty("retCode").GetInt32() != 0)
+                throw new Exception($"API Error: {root.GetProperty("retMsg").GetString()}");
 
-            var result = root.GetProperty("result");
-            if (result.ValueKind == JsonValueKind.Array && result.GetArrayLength() == 0)
-                return null; // позиция не открыта
+            var list = root.GetProperty("result").GetProperty("list");
 
-            // В One-way mode всегда одна запись
-            var positionElement = result.ValueKind == JsonValueKind.Object
-                ? result
-                : result[0];
-
-            // Проверяем, открыта ли позиция
-            var size = decimal.Parse(positionElement.GetProperty("size").GetString(), CultureInfo.InvariantCulture);
-            if (size == 0)
-                return null;
-
-            return new BybitPosition
+            // В unified-аккаунте при one-way mode будет одна запись (или ноль)
+            foreach (var pos in list.EnumerateArray())
             {
-                Symbol = positionElement.GetProperty("symbol").GetString(),
-                Side = positionElement.GetProperty("side").GetString(), // "Buy" или "Sell"
-                Size = size,
-                EntryPrice = decimal.Parse(positionElement.GetProperty("entry_price").GetString(), CultureInfo.InvariantCulture),
-                MarkPrice = decimal.Parse(positionElement.GetProperty("mark_price").GetString(), CultureInfo.InvariantCulture),
-                PositionValue = decimal.Parse(positionElement.GetProperty("position_value").GetString(), CultureInfo.InvariantCulture),
-                Leverage = int.Parse(positionElement.GetProperty("leverage").GetString()),
-                TakeProfit = TryParseDecimal(positionElement, "take_profit"),
-                StopLoss = TryParseDecimal(positionElement, "stop_loss"),
-                UnrealizedPnl = decimal.Parse(positionElement.GetProperty("unrealised_pnl").GetString(), CultureInfo.InvariantCulture),
-                LiqPrice = decimal.Parse(positionElement.GetProperty("liq_price").GetString(), CultureInfo.InvariantCulture)
-            };
-        }
+                // В v5 поле "size" — это строка, "0" означает закрытую позицию
+                var sizeStr = pos.GetProperty("size").GetString();
+                if (string.IsNullOrEmpty(sizeStr) || sizeStr == "0")
+                    continue;
 
+                var size = decimal.Parse(sizeStr, CultureInfo.InvariantCulture);
+                if (size == 0)
+                    continue;
+
+                return new BybitPosition
+                {
+                    Symbol = pos.GetProperty("symbol").GetString(),
+                    Side = DetermineSideFromPosition(pos), // см. ниже
+                    Size = size,
+                    EntryPrice = ParseDecimal(pos, "avgPrice"),      // ← entry_price → avgPrice
+                    MarkPrice = ParseDecimal(pos, "markPrice"),
+                    PositionValue = ParseDecimal(pos, "positionValue"),
+                    Leverage = int.Parse(pos.GetProperty("leverage").GetString()),
+                    TakeProfit = TryParseDecimal(pos, "takeProfit"),
+                    StopLoss = TryParseDecimal(pos, "stopLoss"),
+                    UnrealizedPnl = ParseDecimal(pos, "unrealisedPnl"),
+                    LiqPrice = ParseDecimal(pos, "liqPrice")
+                };
+            }
+
+            return null;
+        }
+        private static decimal ParseDecimal(JsonElement element, string propertyName)
+        {
+            var str = element.GetProperty(propertyName).GetString();
+            return string.IsNullOrEmpty(str)
+                ? 0
+                : decimal.Parse(str, CultureInfo.InvariantCulture);
+        }
+        private static string DetermineSideFromPosition(JsonElement pos)
+        {
+            return pos.GetProperty("side").GetString(); // будет "Buy" или "Sell"
+        }
         public async Task<BybitOrder?> GetActiveOrderAsync(string symbol, string side = null)
         {
-            var endpoint = "/private/linear/order/list";
-            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
-
             var parameters = new Dictionary<string, string>
-            {
-                { "api_key", _apiKey },
-                { "symbol", symbol },
-                { "timestamp", timestamp }
-            };
+    {
+        { "category", "linear" },
+        { "symbol", symbol.ToUpper() },
+        { "api_key", _apiKey },
+        { "recvWindow", "30000" },
+        { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString() }
+    };
 
-            if (!string.IsNullOrEmpty(side))
-                parameters["side"] = side;
-
-            var content = BuildSignedContent(parameters);
-            var response = await SendSignedRequestAsync(endpoint, content);
+            // В v5 фильтрация по side делается уже после получения данных
+            var response = await SendSignedV5RequestAsync("/v5/order/realtime", parameters, HttpMethod.Get);
 
             using var doc = JsonDocument.Parse(response);
             var root = doc.RootElement;
 
-            if (root.GetProperty("ret_code").GetInt32() != 0)
-                throw new Exception($"Failed to fetch orders: {root.GetProperty("ret_msg").GetString()}");
+            if (root.GetProperty("retCode").GetInt32() != 0)
+                throw new Exception($"API Error: {root.GetProperty("retMsg").GetString()}");
 
-            // Важно: в v3+ используется result.data
-            var data = root.GetProperty("result").GetProperty("data");
+            var list = root.GetProperty("result").GetProperty("list");
 
-            foreach (var order in data.EnumerateArray())
+            foreach (var order in list.EnumerateArray())
             {
-                var status = order.GetProperty("order_status").GetString();
-                if (status == "New" || status == "Untriggered" || status == "PartiallyFilled")
+                var status = order.GetProperty("orderStatus").GetString();
+                var orderSide = order.GetProperty("side").GetString();
+
+                // Фильтруем по статусу (активные ордера)
+                if (status is "New" or "PartiallyFilled" or "Untriggered")
                 {
+                    // Фильтрация по стороне, если указана
+                    if (!string.IsNullOrEmpty(side) && !string.Equals(orderSide, side, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
                     return new BybitOrder
                     {
-                        OrderId = order.GetProperty("order_id").GetString(),
+                        OrderId = order.GetProperty("orderId").GetString(),
                         Symbol = order.GetProperty("symbol").GetString(),
-                        Side = order.GetProperty("side").GetString(),
+                        Side = orderSide,
                         Qty = decimal.Parse(order.GetProperty("qty").GetString(), CultureInfo.InvariantCulture),
                         Price = TryParseDecimal(order, "price"),
-                        StopLoss = TryParseDecimal(order, "stop_loss"),
-                        TakeProfit = TryParseDecimal(order, "take_profit"),
+                        StopLoss = TryParseDecimal(order, "stopLoss"),
+                        TakeProfit = TryParseDecimal(order, "takeProfit"),
                         Status = status
                     };
                 }

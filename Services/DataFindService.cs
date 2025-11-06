@@ -17,7 +17,7 @@ namespace CRYPTOAnalize.Services
             //topDriveSignals.TopGainers.ForEach(x => topDriveSignalsString += x.Symbol + ": " + x.PriceChangePercent + "; ");
             //Console.WriteLine(topDriveSignalsString);
 
-            int UpOrLose = random.Next(0, 1);
+            int UpOrLose = random.Next(0, 2);
 
             var workList = topDriveSignals.TopGainers;
             if (UpOrLose == 0)
