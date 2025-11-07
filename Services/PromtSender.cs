@@ -24,6 +24,7 @@ namespace CRYPTOAnalize.Services
                 "\\nНикаких 'hold', никаких пояснений — только JSON по схеме.\"\r\n}\r\ndata:" + json;
 
             string request = await AI_Responser.ASK(answer);
+                
             TradingSignal retSig = null;
             try
             {

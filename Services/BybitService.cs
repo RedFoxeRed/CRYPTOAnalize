@@ -79,7 +79,7 @@ namespace CRYPTOAnalize.Services
                 { "timeInForce", "GTC" },
                 { "positionIdx", "0" }, // 0 = one-way mode
                 { "api_key", _apiKey },
-                { "recvWindow", "30000" },
+                { "recvWindow", "60000" },
                 { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString() }
             };
 
@@ -557,7 +557,7 @@ namespace CRYPTOAnalize.Services
                 if (tickersResponse?.Result?.List == null)
                     throw new InvalidOperationException("Invalid tickers response from Bybit");
 
-                var allTickers = tickersResponse.Result.List;
+                var allTickers = tickersResponse.Result.List.Where(x => Math.Abs(Convert.ToDouble(x.Price24hPcnt.Replace(".", ","))) > 0.035);
 
                 // Фильтруем пары, заканчивающиеся на USDT (в Bybit они так и называются, например BTCUSDT)
                 var usdtTickers = allTickers
@@ -592,14 +592,46 @@ namespace CRYPTOAnalize.Services
                     .ToList();
 
                 // Шаг 2: Фильтруем только те, у которых >=25 недельных свечей
-                var validSymbols = new List<(string Symbol, decimal ChangePercent)>();
+                //var validSymbols = new List<(string Symbol, decimal ChangePercent)>();
+                //foreach (var symbol in candidateSymbols)
+                //{
+                //    var weeksCount = await GetWeeklyCandleCountAsync(symbol);
+                //    if (weeksCount >= 25)
+                //    {
+                //        var pct = usdtTickers.First(x => x.Symbol == symbol).ChangePercent;
+                //        validSymbols.Add((symbol, pct));
+                //    }
+                //}
+
+                var semaphore = new SemaphoreSlim(6); // Ограничение: 6 параллельных запросов
+                var tasks = new List<Task<(string Symbol, int Count)?>>();
+
                 foreach (var symbol in candidateSymbols)
                 {
-                    var weeksCount = await GetWeeklyCandleCountAsync(symbol);
-                    if (weeksCount >= 25)
+                    tasks.Add(ProcessSymbolAsync(symbol, semaphore));
+                }
+
+                var results = await Task.WhenAll(tasks);
+                var validSymbols = results
+                    .Where(r => r.HasValue && r.Value.Count >= 25)
+                    .Select(r =>
                     {
-                        var pct = usdtTickers.First(x => x.Symbol == symbol).ChangePercent;
-                        validSymbols.Add((symbol, pct));
+                        var ticker = usdtTickers.First(x => x.Symbol == r.Value.Symbol);
+                        return (r.Value.Symbol, ticker.ChangePercent);
+                    })
+                    .ToList();
+
+                async Task<(string Symbol, int Count)?> ProcessSymbolAsync(string symbol, SemaphoreSlim sem)
+                {
+                    await sem.WaitAsync();
+                    try
+                    {
+                        var count = await GetWeeklyCandleCountAsync(symbol);
+                        return (symbol, count);
+                    }
+                    finally
+                    {
+                        sem.Release();
                     }
                 }
 
@@ -607,7 +639,7 @@ namespace CRYPTOAnalize.Services
                 var validSorted = validSymbols.OrderByDescending(x => x.ChangePercent).ToList();
 
                 var gainers = validSorted
-                    .Take(10)
+                    .Take(15)
                     .Select(x => new Ticker24hr
                     {
                         Symbol = x.Symbol,
@@ -617,7 +649,7 @@ namespace CRYPTOAnalize.Services
 
                 var losers = validSorted
                     .OrderBy(x => x.ChangePercent)
-                    .Take(10)
+                    .Take(15)
                     .Select(x => new Ticker24hr
                     {
                         Symbol = x.Symbol,

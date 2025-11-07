@@ -11,7 +11,7 @@ namespace CRYPTOAnalize.Services
     {
         public static async Task<Ticker24hr> GetRandomTicker(Random random)
         {
-            var bbService = new BybitService("ss", "ss");
+            var bbService = new BybitService();
             var topDriveSignals = await bbService.GetTop10GainersAndLosersWith25WeeksAsync();
             //string topDriveSignalsString = "";
             //topDriveSignals.TopGainers.ForEach(x => topDriveSignalsString += x.Symbol + ": " + x.PriceChangePercent + "; ");

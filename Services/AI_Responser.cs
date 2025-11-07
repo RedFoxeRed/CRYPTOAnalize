@@ -11,14 +11,15 @@ namespace CRYPTOAnalize.Services
     public class AI_Responser
     {
         public static async Task<string> ASK(string userMessage)
-        {           
+        {
+            Console.WriteLine("Отправка информации о токене..");
             var response = await GetResponseFromNewAPI(userMessage);
             return response;
         }
 
         private static async Task<string> GetResponseFromNewAPI(string userMessage)
         {
-            string mod = "deepseek-r1-0528";
+            string mod = "deepseek-chat-v3.1";
 
             string apiKey = "sk-aitunnel-IP8Sl5Rci8d636Cf3rn5sTR2mrS7GluP";
             string baseURL = "https://api.aitunnel.ru/v1/";
@@ -53,19 +54,20 @@ namespace CRYPTOAnalize.Services
                     Console.WriteLine("Повторная попытка связаться с нейросетью..");
                     response = await httpClient.PostAsync("chat/completions", httpContent);
                 }
-
+                Console.WriteLine("Сигнал получен");
                 // Проверка успешности запроса
                 response.EnsureSuccessStatusCode();
 
                 // Чтение и вывод ответа
                 var responseContent = await response.Content.ReadAsStringAsync();
-
+                Console.WriteLine("Ответ пришел со статусом 'OK'");
                 // Вывод сообщения
                 FreeGPTResponseFormatNEW jsonResponse = null;
                 try
                 {
+                    Console.WriteLine("Форматирование результата..");
                     jsonResponse = JsonConvert.DeserializeObject<FreeGPTResponseFormatNEW>(responseContent);
-
+                    Console.WriteLine(jsonResponse.choices[0].Message.Content);
                 }
                 catch (Exception ex) 
                 {
