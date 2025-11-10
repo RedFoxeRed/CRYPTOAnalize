@@ -4,6 +4,7 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
@@ -28,6 +29,13 @@ namespace CRYPTOAnalize.Services
                 var ticker = await DataFindService.GetRandomTicker(random);
 
                 string symbol = ticker.Symbol; // или BTCUSDT, ETHUSDT и т.д.
+
+                int actualContract = await CheckPositionAndOrder(bybitService, symbol, true); // 0 - сделка закрыта, 1 - открыт ордер, 2 - открыта позиция
+
+                if (actualContract != 0)
+                {
+                    continue;
+                }
 
                 Console.WriteLine($"Выбран токен {symbol} с движением цены {ticker.PriceChangePercent}%.");
 
@@ -72,7 +80,7 @@ namespace CRYPTOAnalize.Services
                 {
                     await Task.Delay(15 * 60 * 1000, cancelToken);
 
-                    int actualContract = await CheckPositionAndOrder(bybitService, symbol, signal); // 0 - сделка закрыта, 1 - открыт ордер, 2 - открыта позиция
+                    actualContract = await CheckPositionAndOrder(bybitService, symbol, signal); // 0 - сделка закрыта, 1 - открыт ордер, 2 - открыта позиция
 
                     if (actualContract == 0)
                     {
@@ -80,6 +88,7 @@ namespace CRYPTOAnalize.Services
                         await GetBalance(bybitService);
                         break;
                     }
+                    Console.WriteLine($"Сделка {symbol} активна");
                     indexPos++;
 
                     if (indexPos > 2)
@@ -136,6 +145,38 @@ namespace CRYPTOAnalize.Services
             );
 
             Console.WriteLine("Сделка успешно создана!");
+
+            side = side == "Buy" ? "Sell" : "Buy";
+
+            double persentChanged = PercentageChange(signal.TakeProfit, signal.EntryPrice);
+
+            if(persentChanged * leverage > 41)
+            {
+                var newPosition = Interpolate(signal.EntryPrice, signal.TakeProfit, 50);
+
+                response = await bybitService.PlaceConditionalTradeAsync(symbol, newPosition, signal.InvestmentAmountUsd * leverage * 0.2m, null, null, leverage, side);
+
+                Console.WriteLine("Расставлена точка при достижении 40%");
+
+                if(persentChanged * leverage > 71)
+                {
+                    newPosition = Interpolate(signal.EntryPrice, signal.TakeProfit, 70);
+
+                    response = await bybitService.PlaceConditionalTradeAsync(symbol, newPosition, signal.InvestmentAmountUsd * leverage * 0.2m, null, null, leverage, side);
+
+                    Console.WriteLine("Расставлена точка при достижении 70%");
+
+                    if(persentChanged * leverage > 101)
+                    {
+                        newPosition = Interpolate(signal.EntryPrice, signal.TakeProfit, 85);
+
+                        response = await bybitService.PlaceConditionalTradeAsync(symbol, newPosition, signal.InvestmentAmountUsd * leverage * 0.2m, null, null, leverage, side);
+
+                        Console.WriteLine("Расставлена точка при достижении 85%");
+                    }
+                }
+            }
+
             return response;
         }
 
@@ -161,6 +202,16 @@ namespace CRYPTOAnalize.Services
 
             return 1; // Открыт только ордер
         }
+
+        private async Task<int> CheckPositionAndOrder(BybitService bbs, string symbol, bool td = false)
+        {
+            var position = await bbs.GetOpenPositionAsync(symbol);
+
+            if (position == null)
+                return 0;
+
+            return 1; // Открыт только ордер
+        }
         private async Task<string> GetDataAboutTicket(string symbol, BinanceService service, string[] intervals)
         {
             Console.WriteLine($"Получение данных для {symbol}...");
@@ -169,6 +220,25 @@ namespace CRYPTOAnalize.Services
             string json = JsonConvert.SerializeObject(snapshot, Formatting.Indented);
             Console.WriteLine("Данные о токене получены..");
             return json;
+        }
+        public double PercentageChange(decimal current, decimal baseline)
+        {
+            if (baseline == 0m)
+                throw new ArgumentException("Базовое число (второе) не может быть равно нулю.");
+
+            decimal result = (current - baseline) / baseline * 100m;
+            return (double)result;
+        }
+        public decimal Interpolate(decimal start, decimal end, double percent)
+        {
+            // Преобразуем percent в долю (0..1), например: 50 → 0.5
+            double ratio = percent / 100.0;
+
+            // Вычисляем разницу в decimal, умножаем на ratio (преобразованный в decimal)
+            // Используем явное приведение double → decimal для умножения
+            decimal offset = (end - start) * (decimal)ratio;
+
+            return start + offset;
         }
     }
 }

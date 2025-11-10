@@ -191,7 +191,7 @@ namespace CRYPTOAnalize.Services
                 using var request = new HttpRequestMessage(HttpMethod.Get, fullUrl);
                 using var response = await _httpClient.SendAsync(request);
                 var responseText = await response.Content.ReadAsStringAsync();
-                LogResponse(responseText);
+                //LogResponse(responseText);
                 ValidateResponse(responseText);
                 return responseText;
             }
