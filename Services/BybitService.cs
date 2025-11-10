@@ -8,6 +8,7 @@ using Newtonsoft.Json;
 using System.Threading.Tasks;
 using System.Text.Json;
 using CryptoAnalyzer.Models;
+using Newtonsoft.Json.Linq;
 
 namespace CRYPTOAnalize.Services
 {
@@ -17,7 +18,7 @@ namespace CRYPTOAnalize.Services
     public class BybitService
     {
         // 🔁 Переключение: Testnet / Mainnet
-        private const string BaseUrl = "https://api-demo.bybit.com"; // ← замените на "https://api.bybit.com" для реальной торговли
+        private const string BaseUrl = "https://api.bybit.com"; // ← замените на "https://api.bybit.com" для реальной торговли
 
         private readonly string _apiKey;
         private readonly string _secretKey;
@@ -64,23 +65,51 @@ namespace CRYPTOAnalize.Services
             // Мы предполагаем One-way → "Buy" = лонг, "Sell" = шорт
 
             // Рассчитываем количество в базовой валюте (например, BTC для BTCUSDT)
-            decimal qty = Math.Floor(positionSizeUsdt / entryPrice * 100_000_000m) / 100_000_000m;
-            if (qty <= 0)
-                throw new InvalidOperationException("Calculated quantity is zero.");
+            var (lotSize, minQty) = await GetSymbolInfoAsync(symbol);
 
+            decimal rawQty = positionSizeUsdt / entryPrice;
+            decimal qty = Math.Floor(rawQty / lotSize) * lotSize; // округление вниз до шага
+
+            if (qty < minQty)
+                throw new ArgumentException($"Calculated qty ({qty}) is below minimum ({minQty}) for {symbol}");
+
+            // Убедитесь, что qty > 0
+            if (qty <= 0)
+                throw new InvalidOperationException("Qty is zero after rounding.");
+
+            //var parameters = new Dictionary<string, string>
+            //{
+            //    { "category", "linear" }, // обязательный параметр в v5
+            //    { "symbol", symbol.ToUpper() },
+            //    { "side", side }, // "Buy" или "Sell"
+            //    { "orderType", "Limit" },
+            //    { "qty", qty.ToString(CultureInfo.InvariantCulture) },
+            //    { "price", entryPrice.ToString(CultureInfo.InvariantCulture) },
+            //    { "timeInForce", "GTC" },
+            //    { "positionIdx", "0" }, // 0 = one-way mode
+            //    { "api_key", _apiKey },
+            //    { "recvWindow", "60000" },
+            //    { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString() }
+            //};
+
+            //if (takeProfit.HasValue)
+            //    parameters["takeProfit"] = takeProfit.Value.ToString(CultureInfo.InvariantCulture);
+
+            //if (stopLoss.HasValue)
+            //    parameters["stopLoss"] = stopLoss.Value.ToString(CultureInfo.InvariantCulture);
+
+            //if (takeProfit.HasValue || stopLoss.HasValue)
+            //    parameters["tpslMode"] = "Full"; // или "Partial"
             var parameters = new Dictionary<string, string>
             {
-                { "category", "linear" }, // обязательный параметр в v5
+                { "category", "linear" },
                 { "symbol", symbol.ToUpper() },
-                { "side", side }, // "Buy" или "Sell"
+                { "side", side },
                 { "orderType", "Limit" },
                 { "qty", qty.ToString(CultureInfo.InvariantCulture) },
                 { "price", entryPrice.ToString(CultureInfo.InvariantCulture) },
                 { "timeInForce", "GTC" },
-                { "positionIdx", "0" }, // 0 = one-way mode
-                { "api_key", _apiKey },
-                { "recvWindow", "60000" },
-                { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString() }
+                { "positionIdx", "0" }
             };
 
             if (takeProfit.HasValue)
@@ -90,14 +119,28 @@ namespace CRYPTOAnalize.Services
                 parameters["stopLoss"] = stopLoss.Value.ToString(CultureInfo.InvariantCulture);
 
             if (takeProfit.HasValue || stopLoss.HasValue)
-                parameters["tpslMode"] = "Full"; // или "Partial"
+                parameters["tpslMode"] = "Full";
+            //parameters["qty"] = qty.ToString(CultureInfo.InvariantCulture);
 
             var response = await SendSignedV5RequestAsync("/v5/order/create", parameters, HttpMethod.Post);
             return JsonDocument.Parse(response);
         }
 
         // =============== ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ===============
+        public async Task<(decimal LotSize, decimal MinOrderQty)> GetSymbolInfoAsync(string symbol)
+        {
+            var url = $"{BaseUrl}/v5/market/instruments-info?category=linear&symbol={symbol.ToUpper()}";
+            using var response = await _httpClient.GetAsync(url);
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            var list = doc.RootElement.GetProperty("result").GetProperty("list");
+            var item = list[0];
 
+            var lotSize = decimal.Parse(item.GetProperty("lotSizeFilter").GetProperty("qtyStep").GetString(), CultureInfo.InvariantCulture);
+            var minQty = decimal.Parse(item.GetProperty("lotSizeFilter").GetProperty("minOrderQty").GetString(), CultureInfo.InvariantCulture);
+
+            return (lotSize, minQty);
+        }
         private async Task<decimal> GetLastPriceAsync(string symbol)
         {
             var url = $"{BaseUrl}/public/linear/tickers?symbol={symbol}";
@@ -127,39 +170,92 @@ namespace CRYPTOAnalize.Services
         //}
         private async Task<string> SendSignedV5RequestAsync(string endpoint, Dictionary<string, string> parameters, HttpMethod method)
         {
-            // Генерируем timestamp и recvWindow (если не задан)
-            if (!parameters.ContainsKey("timestamp"))
-                parameters["timestamp"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+            var recvWindow = "30000";
 
-            if (!parameters.ContainsKey("recvWindow"))
-                parameters["recvWindow"] = "30000";
+            // Обязательные параметры
+            parameters["api_key"] = _apiKey;
+            parameters["timestamp"] = timestamp;
+            parameters["recvWindow"] = recvWindow;
 
-            // Сортируем и строим query string
-            var sorted = parameters.OrderBy(p => p.Key)
-                                   .Select(p => $"{Uri.EscapeDataString(p.Key)}={Uri.EscapeDataString(p.Value)}")
-                                   .ToArray();
-            var queryString = string.Join("&", sorted);
-            var signature = ComputeSignature(queryString, _secretKey);
-            var fullUrl = $"{BaseUrl}{endpoint}?{queryString}&sign={signature}";
+            if (method == HttpMethod.Get)
+            {
+                // Для GET: параметры в query string (с URL-encoding)
+                var sorted = parameters.OrderBy(p => p.Key)
+                                       .Select(p => $"{Uri.EscapeDataString(p.Key)}={Uri.EscapeDataString(p.Value)}")
+                                       .ToArray();
+                var queryString = string.Join("&", sorted);
+                var signature = ComputeSignature(queryString, _secretKey);
+                var fullUrl = $"{BaseUrl}{endpoint}?{queryString}&sign={signature}";
 
-            using var request = new HttpRequestMessage(method, fullUrl);
-            // Для POST в v5 — тело НЕ нужно, всё в URL
-            // Но некоторые эндпоинты требуют Content-Type (даже без тела)
-            if (method == HttpMethod.Post)
-                request.Content = new StringContent("", Encoding.UTF8, "application/json");
+                using var request = new HttpRequestMessage(HttpMethod.Get, fullUrl);
+                using var response = await _httpClient.SendAsync(request);
+                var responseText = await response.Content.ReadAsStringAsync();
+                LogResponse(responseText);
+                ValidateResponse(responseText);
+                return responseText;
+            }
+            else if (method == HttpMethod.Post)
+            {
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
+                recvWindow = "30000";
 
-            using var response = await _httpClient.SendAsync(request);
-            var responseText = await response.Content.ReadAsStringAsync();
+                // Убедитесь, что параметры не содержат лишнего (sign и т.п.)
+                parameters["api_key"] = _apiKey;
+                parameters["timestamp"] = timestamp;
+                parameters["recvWindow"] = recvWindow;
 
-            if (!response.IsSuccessStatusCode)
-                throw new Exception($"HTTP {response.StatusCode}: {responseText}");
+                // Сериализуем тело — именно так, как уйдёт в запрос
+                var jsonBody = JsonConvert.SerializeObject(parameters, Formatting.None);
 
-            // Проверяем retCode
-            using var doc = JsonDocument.Parse(responseText);
-            if (doc.RootElement.GetProperty("retCode").GetInt32() != 0)
-                throw new Exception($"API Error: {doc.RootElement.GetProperty("retMsg").GetString()}");
+                // 🔑 Формируем строку для подписи: timestamp + api_key + recvWindow + jsonBody
+                string payloadToSign = timestamp + _apiKey + recvWindow + jsonBody;
+                string signature = ComputeSignature(payloadToSign, _secretKey);
 
-            return responseText;
+                // Отправляем запрос
+                var fullUrl = $"{BaseUrl}{endpoint}";
+                using var request = new HttpRequestMessage(HttpMethod.Post, fullUrl);
+                request.Content = new StringContent(jsonBody, Encoding.UTF8, "application/json");
+
+                request.Headers.Add("X-BAPI-SIGN", signature);
+                request.Headers.Add("X-BAPI-API-KEY", _apiKey);
+                request.Headers.Add("X-BAPI-TIMESTAMP", timestamp);
+                request.Headers.Add("X-BAPI-RECV-WINDOW", recvWindow);
+
+                using var response = await _httpClient.SendAsync(request);
+                var responseText = await response.Content.ReadAsStringAsync();
+                LogResponse(responseText);
+                ValidateResponse(responseText);
+                return responseText;
+            }
+            else
+            {
+                throw new NotSupportedException($"HTTP method {method} is not supported.");
+            }
+        }
+
+        private void LogResponse(string responseText)
+        {
+            Console.WriteLine("Ответ Bybit: " + responseText);
+        }
+
+        private void ValidateResponse(string responseText)
+        {
+            try
+            {
+                var json = JObject.Parse(responseText);
+                var retCode = json["retCode"]?.Value<int>() ?? -1;
+
+                if (retCode != 0)
+                {
+                    var retMsg = json["retMsg"]?.ToString() ?? "Unknown error";
+                    throw new Exception($"API Error ({retCode}): {retMsg}");
+                }
+            }
+            catch (JsonReaderException ex)
+            {
+                throw new Exception($"Failed to parse JSON response: {ex.Message}. Raw: {responseText}");
+            }
         }
         //private void ValidateTpSl(decimal entryPrice, decimal? tp, decimal? sl, string side)
         //{
@@ -281,7 +377,7 @@ namespace CRYPTOAnalize.Services
                                    .ToArray();
             var queryString = string.Join("&", sorted);
             var signature = ComputeSignature(queryString, _secretKey);
-            var url = $"https://api-demo.bybit.com{endpoint}?{queryString}&sign={signature}";
+            var url = $"https://api.bybit.com{endpoint}?{queryString}&sign={signature}";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             using var response = await _httpClient.SendAsync(request);
@@ -322,32 +418,27 @@ namespace CRYPTOAnalize.Services
             string? tpTriggerBy = "LastPrice",
             string? slTriggerBy = "LastPrice")
         {
-            var parameters = new Dictionary<string, string>
+            // Только бизнес-параметры (уходят в JSON-тело)
+            var bodyParams = new Dictionary<string, string>
             {
                 { "category", "linear" },
                 { "symbol", symbol.ToUpper() },
-                { "api_key", _apiKey },
-                { "recvWindow", "30000" },
-                { "timestamp", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString() }
+                { "positionIdx", "0" }
             };
 
             if (takeProfit.HasValue)
-                parameters["takeProfit"] = takeProfit.Value.ToString(CultureInfo.InvariantCulture);
+                bodyParams["takeProfit"] = takeProfit.Value.ToString(CultureInfo.InvariantCulture);
 
             if (stopLoss.HasValue)
-                parameters["stopLoss"] = stopLoss.Value.ToString(CultureInfo.InvariantCulture);
+                bodyParams["stopLoss"] = stopLoss.Value.ToString(CultureInfo.InvariantCulture);
 
-            // В v5 trigger-by указывается как enum: "LastPrice", "IndexPrice", "MarkPrice"
             if (takeProfit.HasValue && !string.IsNullOrEmpty(tpTriggerBy))
-                parameters["tpTriggerBy"] = tpTriggerBy;
+                bodyParams["tpTriggerBy"] = tpTriggerBy;
 
             if (stopLoss.HasValue && !string.IsNullOrEmpty(slTriggerBy))
-                parameters["slTriggerBy"] = slTriggerBy;
+                bodyParams["slTriggerBy"] = slTriggerBy;
 
-            // Для one-way mode positionIdx = 0 (по умолчанию)
-            parameters["positionIdx"] = "0";
-
-            var response = await SendSignedV5RequestAsync("/v5/position/set-trading-stop", parameters, HttpMethod.Post);
+            var response = await SendSignedV5RequestAsync("/v5/position/set-trading-stop", bodyParams, HttpMethod.Post);
             return JsonDocument.Parse(response);
         }
 
@@ -603,7 +694,7 @@ namespace CRYPTOAnalize.Services
                 //    }
                 //}
 
-                var semaphore = new SemaphoreSlim(6); // Ограничение: 6 параллельных запросов
+                var semaphore = new SemaphoreSlim(10); // Ограничение: 6 параллельных запросов
                 var tasks = new List<Task<(string Symbol, int Count)?>>();
 
                 foreach (var symbol in candidateSymbols)

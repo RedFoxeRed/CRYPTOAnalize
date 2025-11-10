@@ -16,7 +16,6 @@ namespace CRYPTOAnalize.Services
         public async Task StartToWorkAsync(CancellationToken cancelToken)
         {
             var service = new BinanceService();
-            var bybitService = new BybitService("ikgZnYicSZui5G2eWe", "M5by2TsAdp60hFgYoULFVobRz4doKV4Orgj8");
 
             string[] intervals = { "30m", "2h", "1d", "1w" };
             string[] intervalsForUpdate = { "5m", "30m", "1h", "1d" };
@@ -24,6 +23,8 @@ namespace CRYPTOAnalize.Services
 
             while (!cancelToken.IsCancellationRequested)
             {
+                var bybitService = new BybitService("vsJFlH9X3SGalNFVci", "Zut5UqZCzUc4iHhDb6X6MxgdiPRXNFnaL1F2");
+
                 var ticker = await DataFindService.GetRandomTicker(random);
 
                 string symbol = ticker.Symbol; // или BTCUSDT, ETHUSDT и т.д.
@@ -41,6 +42,11 @@ namespace CRYPTOAnalize.Services
                 string json = await GetDataAboutTicket(symbol, service, intervals);
 
                 var balance = await GetBalance(bybitService);
+                if (balance < 20)
+                {
+                    Console.WriteLine("Денег мало. Работа программы остановлена");
+                    break;
+                }
 
                 var signal = await PromtSender.GetSignalDataFromLLM(ticker, json, balance);
 
@@ -83,19 +89,19 @@ namespace CRYPTOAnalize.Services
 
                     balance = await GetBalance(bybitService);
 
-                    var updatedSignal = await PromtSender.UpdateSignalFromLLM(ticker, newJson, signal, balance);
+                    //var updatedSignal = await PromtSender.UpdateSignalFromLLM(ticker, newJson, signal, balance);
 
-                    if(updatedSignal.Action.ToLower() != signal.Action.ToLower() && updatedSignal.Action.ToLower() != "hold")
-                    {
-                        Console.WriteLine("Решение по сделке изменено. Но пока не предпринимаем никаких действий");
-                        continue;
-                    }
+                    //if(updatedSignal.Action.ToLower() != signal.Action.ToLower() && updatedSignal.Action.ToLower() != "hold")
+                    //{
+                    //    Console.WriteLine("Решение по сделке изменено. Но пока не предпринимаем никаких действий");
+                    //    continue;
+                    //}
 
-                    if(actualContract == 2)
-                    {
-                        Console.WriteLine($"Принято решение изменить данные позиции:\n\tTP: {signal.TakeProfit} -> {updatedSignal.TakeProfit}\n\tSL: {signal.StopLoss} -> {updatedSignal.StopLoss}");
-                        await bybitService.UpdatePositionTpSlAsync(symbol, updatedSignal.TakeProfit, updatedSignal.StopLoss);
-                    }
+                    //if(actualContract == 2)
+                    //{
+                    //    Console.WriteLine($"Принято решение изменить данные позиции:\n\tTP: {signal.TakeProfit} -> {updatedSignal.TakeProfit}\n\tSL: {signal.StopLoss} -> {updatedSignal.StopLoss}");
+                    //    await bybitService.UpdatePositionTpSlAsync(symbol, updatedSignal.TakeProfit, updatedSignal.StopLoss);
+                    //}
                 }
             }            
         }
@@ -122,7 +128,7 @@ namespace CRYPTOAnalize.Services
             var response = await bybitService.PlaceConditionalTradeAsync(
                 symbol,
                 signal.EntryPrice,
-                signal.InvestmentAmountUsd,
+                signal.InvestmentAmountUsd * leverage,
                 signal.TakeProfit,
                 signal.StopLoss,
                 leverage,
