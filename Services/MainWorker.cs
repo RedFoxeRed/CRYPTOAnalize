@@ -61,7 +61,7 @@ namespace CRYPTOAnalize.Services
                 if (signal == null)
                     continue;
 
-                if (signal.InvestmentAmountUsd < 2)
+                if (signal.InvestmentAmountUsd < 2 || signal.Confidence < 0.60m)
                 {
                     Console.WriteLine($"Было решено не вкладываться в {symbol}. Поиск следующего токена..");
                     await Task.Delay(750, cancelToken);
