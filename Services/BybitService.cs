@@ -64,6 +64,8 @@ namespace CRYPTOAnalize.Services
             // Но в unified лонг/шорт управляется через режим позиции (Hedge/One-way)
             // Мы предполагаем One-way → "Buy" = лонг, "Sell" = шорт
 
+            //await SetLeverageAsync(symbol, leverage);
+
             // Рассчитываем количество в базовой валюте (например, BTC для BTCUSDT)
             var (lotSize, minQty) = await GetSymbolInfoAsync(symbol);
 
@@ -156,18 +158,18 @@ namespace CRYPTOAnalize.Services
             return decimal.Parse(lastPrice, CultureInfo.InvariantCulture);
         }
 
-        //private async Task SetLeverageAsync(string symbol, int leverage)
-        //{
-        //    var parameters = new Dictionary<string, string>
-        //    {
-        //        { "category", "linear" },
-        //        { "symbol", symbol.ToUpper() },
-        //        { "buyLeverage", leverage.ToString() },
-        //        { "sellLeverage", leverage.ToString() }
-        //    };
+        private async Task SetLeverageAsync(string symbol, int leverage)
+        {
+            var parameters = new Dictionary<string, string>
+            {
+                { "category", "linear" },
+                { "symbol", symbol.ToUpper() },
+                { "buyLeverage", leverage.ToString() },
+                { "sellLeverage", leverage.ToString() }
+            };
 
-        //    await SendSignedV5RequestAsync("/v5/position/set-leverage", parameters, HttpMethod.Post);
-        //}
+            await SendSignedV5RequestAsync("/v5/position/set-leverage", parameters, HttpMethod.Post);
+        }
         private async Task<string> SendSignedV5RequestAsync(string endpoint, Dictionary<string, string> parameters, HttpMethod method)
         {
             var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
@@ -191,6 +193,9 @@ namespace CRYPTOAnalize.Services
                 using var request = new HttpRequestMessage(HttpMethod.Get, fullUrl);
                 using var response = await _httpClient.SendAsync(request);
                 var responseText = await response.Content.ReadAsStringAsync();
+
+                //Console.WriteLine(responseText);
+
                 //LogResponse(responseText);
                 ValidateResponse(responseText);
                 return responseText;

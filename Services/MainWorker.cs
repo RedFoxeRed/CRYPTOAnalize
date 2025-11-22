@@ -61,7 +61,11 @@ namespace CRYPTOAnalize.Services
                 if (signal == null)
                     continue;
 
-                if (signal.InvestmentAmountUsd < 2 || signal.Confidence < 0.60m)
+                double persentChanged = PercentageChange(signal.TakeProfit, signal.EntryPrice);
+
+                bool check1 = (signal.Action.ToLower().Contains("sel") && persentChanged * 10 > 41) || (signal.Action.ToLower().Contains("buy") && persentChanged * 10 > 81);
+
+                if ((signal.InvestmentAmountUsd < 2 || signal.Confidence < 0.60m) && !check1)
                 {
                     Console.WriteLine($"Было решено не вкладываться в {symbol}. Поиск следующего токена..");
                     await Task.Delay(750, cancelToken);
